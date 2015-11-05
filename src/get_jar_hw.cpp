@@ -37,6 +37,7 @@
 #include <octomap/octomap.h>
 #include <octomap_msgs/conversions.h>
 #include <octomap_msgs/GetOctomap.h>
+#include <actionlib/client/simple_action_client.h>
 
 #include <string>
 #include <stdlib.h>
@@ -44,6 +45,9 @@
 
 #include "Eigen/Dense"
 #include "Eigen/LU"
+
+#include "barrett_hand_controller_msgs/Empty.h"
+#include <barrett_hand_controller_msgs/BHMoveAction.h>
 
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/SpaceInformation.h>
@@ -73,6 +77,8 @@
 #include "experiments_utilities.h"
 #include "ompl_utilities.h"
 #include "velma_robrex_utilities.h"
+#include "barrett_hand_interface.h"
+#include "velma_interface.h"
 
 class TestDynamicModel {
     ros::NodeHandle nh_;
@@ -95,6 +101,11 @@ public:
     }
 
     void spin() {
+
+        std::string gripper_side("right");
+        std::string effector_name = gripper_side + "_HandGripLink";
+        std::string hand_name = gripper_side + "_HandPalmLink";
+
         // initialize random seed
         srand(time(NULL));
 
@@ -192,45 +203,24 @@ public:
 
         int ndof = joint_names.size();
 
+        // equilibrium pose
         Eigen::VectorXd q_eq(ndof);
         Eigen::VectorXd q(ndof);
 
-        double init_q[15] = {
-        deg2rad(0),     // torso_0_joint
-        deg2rad(-45),   // right_arm_0_joint
-        deg2rad(-110),  // right_arm_1_joint
-        deg2rad(70),    // right_arm_2_joint
-        deg2rad(110),   // right_arm_3_joint
-        deg2rad(0),     // right_arm_4_joint
-        deg2rad(-90),   // right_arm_5_joint
-        deg2rad(0),     // right_arm_6_joint
-        deg2rad(45),    // left_arm_0_joint
-        deg2rad(110),   // left_arm_1_joint
-        deg2rad(-70),   // left_arm_2_joint
-        deg2rad(-110),  // left_arm_3_joint
-        deg2rad(0),     // left_arm_4_joint
-        deg2rad(90),    // left_arm_5_joint
-        deg2rad(0),     // left_arm_6_joint
+        double q_eq_vec[15] = {
+            deg2rad(0),
+            deg2rad(-45), deg2rad(-110), deg2rad(70), deg2rad(110), deg2rad(0), deg2rad(-90), deg2rad(0),
+            deg2rad(45), deg2rad(110), deg2rad(-70), deg2rad(-110), deg2rad(0), deg2rad(90), deg2rad(0),
         };
 
         for (int q_idx = 0; q_idx < ndof; q_idx++) {
-            q_eq(q_idx) = init_q[q_idx];
+            q_eq(q_idx) = q_eq_vec[q_idx];
         }
-
-        std::string gripper_side("right");
-        std::string effector_name = gripper_side + "_HandGripLink";
-        std::string hand_name = gripper_side + "_HandPalmLink";
 
         //
         // kinematic model
         //
         boost::shared_ptr<KinematicModel > kin_model( new KinematicModel(robot_description_str, joint_names) );
-        kin_model->setIgnoredJointValue("right_HandFingerOneKnuckleTwoJoint", 120.0/180.0*PI);
-        kin_model->setIgnoredJointValue("right_HandFingerTwoKnuckleTwoJoint", 120.0/180.0*PI);
-        kin_model->setIgnoredJointValue("right_HandFingerThreeKnuckleTwoJoint", 120.0/180.0*PI);
-        kin_model->setIgnoredJointValue("right_HandFingerOneKnuckleThreeJoint", 40.0/180.0*PI);
-        kin_model->setIgnoredJointValue("right_HandFingerTwoKnuckleThreeJoint", 40.0/180.0*PI);
-        kin_model->setIgnoredJointValue("right_HandFingerThreeKnuckleThreeJoint", 40.0/180.0*PI);
         Eigen::VectorXd ign_q;
         std::vector<std::string > ign_joint_names;
         kin_model->getIgnoredJoints(ign_q, ign_joint_names);
@@ -246,17 +236,35 @@ public:
 
         std::vector<KDL::Frame > links_fk(col_model->getLinksCount());
 
-        // TEST: set random initial pose
-        while (true) {
-            for (int q_idx = 0; q_idx < ndof; q_idx++) {
-                q(q_idx) = init_q[q_idx] + randomUniform(deg2rad(-30), deg2rad(30));
-                q(q_idx) = std::max(kin_model->getLowerLimit(q_idx), q(q_idx));
-                q(q_idx) = std::min(kin_model->getUpperLimit(q_idx), q(q_idx));
-            }
-            if (isStateValidE(q, col_model, kin_model, ndof, wrist_cc_r, wrist_cc_l)) {
-                break;
-            }
+        VelmaInterface vi(joint_names, ign_joint_names);
+
+        BarrettHandInterface bh_l("left");
+        BarrettHandInterface bh_r("right");
+
+        bh_l.resetFingers();
+        bh_r.resetFingers();
+
+        ros::Duration(2.0).sleep();
+
+        bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+        bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+
+        if (!bh_l.waitForSuccess(5.0)) {
+            std::cout << "ERROR: bh_l.moveFingers" << std::endl;
+            return;
         }
+        if (!bh_r.waitForSuccess(5.0)) {
+            std::cout << "ERROR: bh_r.moveFingers" << std::endl;
+            return;
+        }
+
+        vi.waitForJointState(q, ign_q);
+
+        for (int idx = 0; idx < ign_joint_names.size(); idx++) {
+            kin_model->setIgnoredJointValue(ign_joint_names[idx], ign_q(idx));
+        }
+
+        showPlanerState(markers_pub_, q, col_model, kin_model);
 
         // move the robot to initial configuration
         std::map<std::string, double > goal_right;
@@ -290,6 +298,11 @@ public:
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
+        // execute trajectory
+        vi.switchToJoint();
+        vi.moveJointTraj(path, 0.5, deg2rad(5));
+        vi.waitForJoint(60);
+
         while (ros::ok()) {
             if (planTrajectoryRRT(q, goal_left, col_model, kin_model, wrist_cc_r, wrist_cc_l, path)) {
                 break;
@@ -301,6 +314,10 @@ public:
         }
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
+
+        // execute trajectory
+        vi.moveJointTraj(path, 0.5, deg2rad(5));
+        vi.waitForJoint(60);
 
         // generate grasps for the jar
         std::list<KDL::Frame> T_W_G_list;

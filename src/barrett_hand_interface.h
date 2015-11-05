@@ -29,53 +29,31 @@
 // Author: Dawid Seredynski
 //
 
-#ifndef OMPL_UTILITIES_H__
-#define OMPL_UTILITIES_H__
+#ifndef BARRETT_HAND_INTERFACE_H__
+#define BARRETT_HAND_INTERFACE_H__
 
-#include <string>
-#include <stdlib.h>
-#include <stdio.h>
+#include <ros/ros.h>
+#include <sensor_msgs/JointState.h>
+#include <actionlib/client/simple_action_client.h>
+#include <barrett_hand_controller_msgs/Empty.h>
+#include <barrett_hand_controller_msgs/BHMoveAction.h>
 
 #include "Eigen/Dense"
 
-#include <ompl/base/spaces/RealVectorStateSpace.h>
-#include <ompl/base/SpaceInformation.h>
-#include <ompl/base/State.h>
-#include <ompl/base/ScopedState.h>
-#include <ompl/base/Path.h>
-#include <ompl/base/goals/GoalState.h>
-#include <ompl/base/ProblemDefinition.h>
-#include <ompl/geometric/planners/rrt/RRTstar.h>
-#include <ompl/geometric/planners/rrt/RRTConnect.h>
-#include <ompl/geometric/planners/rrt/LBTRRT.h>
-
-#include "kin_model/kin_model.h"
-
-void stateOmplToEigen(const ompl::base::State *s, Eigen::VectorXd &x, int ndof);
-void stateEigenToOmpl(const Eigen::VectorXd &x, ompl::base::State *s, int ndof);
-
-class VelmaRightGripperIkGoal : public ompl::base::GoalSampleableRegion {
-public:
-
-    VelmaRightGripperIkGoal(const ompl::base::SpaceInformationPtr &si, const KDL::Frame &T_W_G_dest,
-                            const boost::shared_ptr<KinematicModel> &kin_model, const std::string &effector_name,
-                            const ompl::base::StateValidityCheckerFn &svc);
-
-    virtual void sampleGoal (ompl::base::State *st) const;
-
-    virtual unsigned int maxSampleCount () const;
-
-    virtual bool couldSample () const;
-
-    virtual double distanceGoal (const ompl::base::State *st) const;
-
+class BarrettHandInterface {
 protected:
-    KDL::Frame T_W_G_dest_;
-    const boost::shared_ptr<KinematicModel> &kin_model_;
-    int ndof_;
-    std::string effector_name_;
-    ompl::base::StateValidityCheckerFn svc_;
+    ros::NodeHandle nh_;
+    const std::string prefix_;
+    actionlib::SimpleActionClient<barrett_hand_controller_msgs::BHMoveAction> action_move_;
+
+public:
+    BarrettHandInterface(const std::string &prefix);
+    ~BarrettHandInterface();
+    void resetFingers();
+    // spread, f1, f2, f3
+    void moveFingers(const Eigen::Vector4d &q, const Eigen::Vector4d &v, const Eigen::Vector4d &t, double max_pressure, bool hold);
+    bool waitForSuccess(double max_duration);
 };
 
-#endif  // OMPL_UTILITIES_H__
+#endif  // BARRETT_HAND_INTERFACE_H__
 

@@ -29,53 +29,45 @@
 // Author: Dawid Seredynski
 //
 
-#ifndef OMPL_UTILITIES_H__
-#define OMPL_UTILITIES_H__
+#ifndef VELMA_INTERFACE_H__
+#define VELMA_INTERFACE_H__
 
-#include <string>
-#include <stdlib.h>
-#include <stdio.h>
+#include <ros/ros.h>
+#include <sensor_msgs/JointState.h>
+#include <actionlib/client/simple_action_client.h>
+#include <sensor_msgs/JointState.h>
+#include <control_msgs/FollowJointTrajectoryAction.h>
+#include <cartesian_trajectory_msgs/CartesianTrajectoryAction.h>
 
 #include "Eigen/Dense"
+#include <kdl/frames.hpp>
 
-#include <ompl/base/spaces/RealVectorStateSpace.h>
-#include <ompl/base/SpaceInformation.h>
-#include <ompl/base/State.h>
-#include <ompl/base/ScopedState.h>
-#include <ompl/base/Path.h>
-#include <ompl/base/goals/GoalState.h>
-#include <ompl/base/ProblemDefinition.h>
-#include <ompl/geometric/planners/rrt/RRTstar.h>
-#include <ompl/geometric/planners/rrt/RRTConnect.h>
-#include <ompl/geometric/planners/rrt/LBTRRT.h>
-
-#include "kin_model/kin_model.h"
-
-void stateOmplToEigen(const ompl::base::State *s, Eigen::VectorXd &x, int ndof);
-void stateEigenToOmpl(const Eigen::VectorXd &x, ompl::base::State *s, int ndof);
-
-class VelmaRightGripperIkGoal : public ompl::base::GoalSampleableRegion {
-public:
-
-    VelmaRightGripperIkGoal(const ompl::base::SpaceInformationPtr &si, const KDL::Frame &T_W_G_dest,
-                            const boost::shared_ptr<KinematicModel> &kin_model, const std::string &effector_name,
-                            const ompl::base::StateValidityCheckerFn &svc);
-
-    virtual void sampleGoal (ompl::base::State *st) const;
-
-    virtual unsigned int maxSampleCount () const;
-
-    virtual bool couldSample () const;
-
-    virtual double distanceGoal (const ompl::base::State *st) const;
-
+class VelmaInterface {
 protected:
-    KDL::Frame T_W_G_dest_;
-    const boost::shared_ptr<KinematicModel> &kin_model_;
-    int ndof_;
-    std::string effector_name_;
-    ompl::base::StateValidityCheckerFn svc_;
+    enum Effector {Left, Right};
+
+    ros::NodeHandle nh_;
+    std::vector<std::string > joint_names_;
+    std::vector<std::string > ign_joint_names_;
+    std::map<std::string, int > j_name_idx_map_;
+    std::map<std::string, int > ign_j_name_idx_map_;
+    Eigen::VectorXd q_, ign_q_;
+    bool q_updated_, ign_q_updated_;
+    actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> action_jimp_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_cimp_l_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_cimp_r_;
+    bool cartesian_impedance_active_, joint_impedance_active_;
+    bool moveEffector(VelmaInterface::Effector ef, const KDL::Frame &T_B_E, double time, double max_force, double max_torque, double start_time);
+public:
+    VelmaInterface(const std::vector<std::string > &joint_names, const std::vector<std::string > &ign_joint_names);
+    ~VelmaInterface();
+    void jointStatesCallback(const sensor_msgs::JointState &js);
+    bool waitForJointState(Eigen::VectorXd &q, Eigen::VectorXd &ign_q);
+    bool moveJointTraj(const std::list<Eigen::VectorXd > &traj, double start_time, double speed);
+    bool waitForJoint(double max_duration);
+    bool switchToJoint();
+    bool switchToCart();
 };
 
-#endif  // OMPL_UTILITIES_H__
+#endif  // VELMA_INTERFACE_H__
 

@@ -29,53 +29,47 @@
 // Author: Dawid Seredynski
 //
 
-#ifndef OMPL_UTILITIES_H__
-#define OMPL_UTILITIES_H__
+#include "barrett_hand_interface.h"
 
-#include <string>
-#include <stdlib.h>
-#include <stdio.h>
+    BarrettHandInterface::BarrettHandInterface(const std::string &prefix) :
+        nh_(),
+        prefix_(prefix),
+        action_move_(std::string("/") + prefix_ + "_hand/move_hand", true)
+    {
+    }
 
-#include "Eigen/Dense"
+    BarrettHandInterface::~BarrettHandInterface() {
+    }
 
-#include <ompl/base/spaces/RealVectorStateSpace.h>
-#include <ompl/base/SpaceInformation.h>
-#include <ompl/base/State.h>
-#include <ompl/base/ScopedState.h>
-#include <ompl/base/Path.h>
-#include <ompl/base/goals/GoalState.h>
-#include <ompl/base/ProblemDefinition.h>
-#include <ompl/geometric/planners/rrt/RRTstar.h>
-#include <ompl/geometric/planners/rrt/RRTConnect.h>
-#include <ompl/geometric/planners/rrt/LBTRRT.h>
+    void BarrettHandInterface::resetFingers() {
+        barrett_hand_controller_msgs::Empty reset_fingers;
+        if (!ros::service::call(std::string("/") + prefix_ + "_hand/reset_fingers", reset_fingers)) {
+            std::cout << "ERROR: ros::service::call(\"/" << prefix_ << "_hand/reset_fingers\" " << std::endl;
+        }
+    }
 
-#include "kin_model/kin_model.h"
+    void BarrettHandInterface::moveFingers(const Eigen::Vector4d &q, const Eigen::Vector4d &v, const Eigen::Vector4d &t, double max_pressure, bool hold) {
+        action_move_.waitForServer();
+        barrett_hand_controller_msgs::BHMoveGoal goal;
+        goal.name.push_back(prefix_+"_HandFingerOneKnuckleOneJoint");
+        goal.name.push_back(prefix_+"_HandFingerOneKnuckleTwoJoint");
+        goal.name.push_back(prefix_+"_HandFingerTwoKnuckleTwoJoint");
+        goal.name.push_back(prefix_+"_HandFingerThreeKnuckleTwoJoint");
+        for (int i = 0; i < 4; i++) {
+            goal.q.push_back( q(i) );
+            goal.v.push_back( v(i) );
+            goal.t.push_back( t(i) );
+        }
+        goal.maxPressure = max_pressure;
+        goal.hold = hold;
+        action_move_.sendGoal(goal);
+    }
 
-void stateOmplToEigen(const ompl::base::State *s, Eigen::VectorXd &x, int ndof);
-void stateEigenToOmpl(const Eigen::VectorXd &x, ompl::base::State *s, int ndof);
-
-class VelmaRightGripperIkGoal : public ompl::base::GoalSampleableRegion {
-public:
-
-    VelmaRightGripperIkGoal(const ompl::base::SpaceInformationPtr &si, const KDL::Frame &T_W_G_dest,
-                            const boost::shared_ptr<KinematicModel> &kin_model, const std::string &effector_name,
-                            const ompl::base::StateValidityCheckerFn &svc);
-
-    virtual void sampleGoal (ompl::base::State *st) const;
-
-    virtual unsigned int maxSampleCount () const;
-
-    virtual bool couldSample () const;
-
-    virtual double distanceGoal (const ompl::base::State *st) const;
-
-protected:
-    KDL::Frame T_W_G_dest_;
-    const boost::shared_ptr<KinematicModel> &kin_model_;
-    int ndof_;
-    std::string effector_name_;
-    ompl::base::StateValidityCheckerFn svc_;
-};
-
-#endif  // OMPL_UTILITIES_H__
+    bool BarrettHandInterface::waitForSuccess(double max_duration) {
+        action_move_.waitForResult(ros::Duration(max_duration));
+        if (action_move_.getState() == actionlib::SimpleClientGoalState::SUCCEEDED) {
+            return true;
+        }
+        return false;
+    }
 
