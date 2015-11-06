@@ -38,6 +38,7 @@
 #include <sensor_msgs/JointState.h>
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <cartesian_trajectory_msgs/CartesianTrajectoryAction.h>
+#include <cartesian_trajectory_msgs/CartesianImpedanceAction.h>
 
 #include "Eigen/Dense"
 #include <kdl/frames.hpp>
@@ -53,11 +54,21 @@ protected:
     std::map<std::string, int > ign_j_name_idx_map_;
     Eigen::VectorXd q_, ign_q_;
     bool q_updated_, ign_q_updated_;
-    actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> action_jimp_;
-    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_cimp_l_;
-    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_cimp_r_;
+    boost::shared_ptr<actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> > action_jmove_;
+    boost::shared_ptr<actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> > action_cmove_l_;
+    boost::shared_ptr<actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> > action_cmove_r_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_tool_l_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianTrajectoryAction> action_tool_r_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianImpedanceAction> action_cimp_l_;
+    actionlib::SimpleActionClient<cartesian_trajectory_msgs::CartesianImpedanceAction> action_cimp_r_;
     bool cartesian_impedance_active_, joint_impedance_active_;
     bool moveEffector(VelmaInterface::Effector ef, const KDL::Frame &T_B_E, double time, double max_force, double max_torque, double start_time);
+    bool waitForEffectorMove(VelmaInterface::Effector ef, double max_duration);
+    bool moveTool(VelmaInterface::Effector ef, const KDL::Frame &T_W_T, double time, double start_time);
+    bool waitForToolMove(VelmaInterface::Effector ef, double max_duration);
+    bool moveImpedance(VelmaInterface::Effector ef, double time, double start_time, const KDL::Wrench &stiffness, const KDL::Wrench &damping);
+    bool waitForImpedance(VelmaInterface::Effector ef, double max_duration);
+
 public:
     VelmaInterface(const std::vector<std::string > &joint_names, const std::vector<std::string > &ign_joint_names);
     ~VelmaInterface();
@@ -67,6 +78,18 @@ public:
     bool waitForJoint(double max_duration);
     bool switchToJoint();
     bool switchToCart();
+    bool moveEffectorLeft(const KDL::Frame &T_B_E, double time, double max_force, double max_torque, double start_time);
+    bool moveEffectorRight(const KDL::Frame &T_B_E, double time, double max_force, double max_torque, double start_time);
+    bool waitForEffectorMoveLeft(double max_duration);
+    bool waitForEffectorMoveRight(double max_duration);
+    bool moveToolLeft(const KDL::Frame &T_W_T, double time, double start_time);
+    bool moveToolRight(const KDL::Frame &T_W_T, double time, double start_time);
+    bool waitForToolMoveLeft(double max_duration);
+    bool waitForToolMoveRight(double max_duration);
+    bool moveImpedanceLeft(double time, double start_time, const KDL::Wrench &stiffness, const KDL::Wrench &damping);
+    bool moveImpedanceRight(double time, double start_time, const KDL::Wrench &stiffness, const KDL::Wrench &damping);
+    bool waitForImpedanceLeft(double max_duration);
+    bool waitForImpedanceRight(double max_duration);
 };
 
 #endif  // VELMA_INTERFACE_H__

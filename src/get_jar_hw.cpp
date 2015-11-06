@@ -100,7 +100,18 @@ public:
     ~TestDynamicModel() {
     }
 
+    int getchar2() {
+        int c = getchar();
+        int c2 = getchar();
+        if (c2 != '\n') {
+            return c2;
+        }
+        return c;
+    }
+
     void spin() {
+
+        double time_mult = 0.3;
 
         std::string gripper_side("right");
         std::string effector_name = gripper_side + "_HandGripLink";
@@ -109,35 +120,7 @@ public:
         // initialize random seed
         srand(time(NULL));
 
-        KDL::Frame T_W_J(KDL::Vector(0.85, -0.2, 1.22));
-
-        // prepare the octomap
-        boost::shared_ptr<octomap::OcTree > oc_map;
-        {
-            // get the octomap from the server
-            octomap_msgs::GetOctomap get_oc_map;
-            if (!ros::service::call("/octomap_full", get_oc_map)) {
-                std::cout << "ERROR: ros::service::call(\"/octomap_full\" " << std::endl;
-                return;
-            }
-            oc_map.reset( static_cast<octomap::OcTree* >( octomap_msgs::fullMsgToMap( get_oc_map.response.map ) ) );
-
-            // delete all unnecessary nodes
-            oc_map->expand();
-            int occupied_count = 0;
-            std::list<octomap::OcTreeKey > del_key_list;
-            for (octomap::OcTree::leaf_iterator it = oc_map->begin_leafs(); it != oc_map->end_leafs(); it++) {
-                if(it->getOccupancy() <= oc_map->getOccupancyThres())
-                {
-                    del_key_list.push_back(it.getKey());
-                    continue;
-                }
-                occupied_count++;
-            }
-            for (std::list<octomap::OcTreeKey >::const_iterator it = del_key_list.begin(); it != del_key_list.end(); it++) {
-                oc_map->deleteNode( (*it) );
-            }
-        }
+        KDL::Frame T_W_J(KDL::Vector(0.85, 0, 1.22));
 
         std::string robot_description_str;
         std::string robot_semantic_description_str;
@@ -160,7 +143,7 @@ public:
         boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.045, 0.07, T_W_J);
         col_array.push_back( jar_co );
 
-        col_array.push_back( self_collision::createCollisionOctomap(oc_map, KDL::Frame()) );
+//        col_array.push_back( self_collision::createCollisionOctomap(oc_map, KDL::Frame()) );
 
         if (!col_model->addLink("env_link", "torso_base", col_array)) {
             ROS_ERROR("ERROR: could not add external collision objects to the collision model");
@@ -174,9 +157,6 @@ public:
                 (*it)->geometry->setColor(0,1,0,0.5);
             }
         }
-
-        // remove the jar from the octomap
-        removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
 
         VelmaQ5Q6CollisionChecker wrist_cc_r(6, 7, 0.2, false);
         VelmaQ5Q6CollisionChecker wrist_cc_l(13, 14, 0.2, true);
@@ -237,14 +217,15 @@ public:
         std::vector<KDL::Frame > links_fk(col_model->getLinksCount());
 
         VelmaInterface vi(joint_names, ign_joint_names);
-
         BarrettHandInterface bh_l("left");
         BarrettHandInterface bh_r("right");
+        ros::Duration(1.0).sleep();
+
 
         bh_l.resetFingers();
         bh_r.resetFingers();
 
-        ros::Duration(2.0).sleep();
+        ros::Duration(5.0).sleep();
 
         bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
         bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
@@ -259,12 +240,13 @@ public:
         }
 
         vi.waitForJointState(q, ign_q);
-
-        for (int idx = 0; idx < ign_joint_names.size(); idx++) {
-            kin_model->setIgnoredJointValue(ign_joint_names[idx], ign_q(idx));
-        }
-
+        kin_model->setIgnoredJointValues(ign_joint_names, ign_q);
         showPlanerState(markers_pub_, q, col_model, kin_model);
+
+        std::cout << "type 'c' to continue (plan)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         // move the robot to initial configuration
         std::map<std::string, double > goal_right;
@@ -298,10 +280,25 @@ public:
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
+        std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
+
         // execute trajectory
         vi.switchToJoint();
-        vi.moveJointTraj(path, 0.5, deg2rad(5));
-        vi.waitForJoint(60);
+        vi.moveJointTraj(path, 0.5, deg2rad(1 / time_mult));
+        vi.waitForJoint(240 * time_mult);
+
+        // update the robot state for planners
+        vi.waitForJointState(q, ign_q);
+        kin_model->setIgnoredJointValues(ign_joint_names, ign_q);
+        showPlanerState(markers_pub_, q, col_model, kin_model);
+
+        std::cout << "type 'c' to continue (plan)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         while (ros::ok()) {
             if (planTrajectoryRRT(q, goal_left, col_model, kin_model, wrist_cc_r, wrist_cc_l, path)) {
@@ -315,9 +312,61 @@ public:
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
+        std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
+
         // execute trajectory
-        vi.moveJointTraj(path, 0.5, deg2rad(5));
-        vi.waitForJoint(60);
+        vi.moveJointTraj(path, 0.5, deg2rad(1 / time_mult));
+        vi.waitForJoint(240 * time_mult);
+
+        //
+        // prepare the octomap
+        //
+        boost::shared_ptr<octomap::OcTree > oc_map;
+        {
+            // get the octomap from the server
+            octomap_msgs::GetOctomap get_oc_map;
+            if (!ros::service::call("/octomap_full", get_oc_map)) {
+                std::cout << "ERROR: ros::service::call(\"/octomap_full\" " << std::endl;
+                return;
+            }
+            oc_map.reset( static_cast<octomap::OcTree* >( octomap_msgs::fullMsgToMap( get_oc_map.response.map ) ) );
+
+            // delete all unnecessary nodes
+            oc_map->expand();
+            int occupied_count = 0;
+            std::list<octomap::OcTreeKey > del_key_list;
+            for (octomap::OcTree::leaf_iterator it = oc_map->begin_leafs(); it != oc_map->end_leafs(); it++) {
+                if(it->getOccupancy() <= oc_map->getOccupancyThres())
+                {
+                    del_key_list.push_back(it.getKey());
+                    continue;
+                }
+                occupied_count++;
+            }
+            for (std::list<octomap::OcTreeKey >::const_iterator it = del_key_list.begin(); it != del_key_list.end(); it++) {
+                oc_map->deleteNode( (*it) );
+            }
+        }
+        // remove the jar from the octomap
+        removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
+//        col_array.push_back( self_collision::createCollisionOctomap(oc_map, KDL::Frame()) );
+        col_model->addCollisionToLink("env_link", self_collision::createCollisionOctomap(oc_map, KDL::Frame()), KDL::Frame());
+
+
+
+
+        // update the robot state for planners
+        vi.waitForJointState(q, ign_q);
+        kin_model->setIgnoredJointValues(ign_joint_names, ign_q);
+        showPlanerState(markers_pub_, q, col_model, kin_model);
+
+        std::cout << "type 'c' to continue (plan)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         // generate grasps for the jar
         std::list<KDL::Frame> T_W_G_list;
@@ -372,13 +421,32 @@ public:
         }
 
         double max_dist = -1;
-        KDL::Frame T_W_Gbest;
+//        KDL::Frame T_W_Gbest;
         for (std::list<std::pair<KDL::Frame, double > >::const_iterator it = T_W_G_valid_list.begin(); it != T_W_G_valid_list.end(); it++) {
             if (max_dist < 0 || max_dist < it->second) {
                 max_dist = it->second;
+//                T_W_Gbest = it->first;
+            }
+        }
+
+        std::list<std::pair<KDL::Frame, double > > T_W_G_valid_list2;
+        for (std::list<std::pair<KDL::Frame, double > >::const_iterator it = T_W_G_valid_list.begin(); it != T_W_G_valid_list.end(); it++) {
+            if (it->second > max_dist * 0.8) {
+                T_W_G_valid_list2.push_back( (*it) );
+            }
+        }
+
+        double closest_pose = -1;
+        KDL::Frame T_W_Gbest;
+        for (std::list<std::pair<KDL::Frame, double > >::const_iterator it = T_W_G_valid_list2.begin(); it != T_W_G_valid_list2.end(); it++) {
+            KDL::Twist diff = KDL::diff(T_W_Gcurrent, it->first);
+            double dist = diff.vel.Norm() + diff.rot.Norm() * 0.01;
+            if (closest_pose < 0 || closest_pose > dist) {
+                closest_pose = dist;
                 T_W_Gbest = it->first;
             }
         }
+
         std::cout << "min_dist: " << max_dist << std::endl;
         publishTransform(br, T_W_Gbest, std::string("effector_dest"), "world");
 
@@ -391,21 +459,155 @@ public:
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
-        // close the fingers to the pre-grasp configuration
-        for (std::map<std::string, double >::const_iterator it = hand_q_map.begin(); it != hand_q_map.end(); it++) {
-            kin_model->setIgnoredJointValue(it->first, it->second);
+        std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
         }
-        kin_model->getIgnoredJoints(ign_q, ign_joint_names);
+
+        // execute trajectory
+        vi.moveJointTraj(path, 0.5, deg2rad(1 / time_mult));
+        vi.waitForJoint(240 * time_mult);
+
+        // close the fingers to the pre-grasp configuration
+        if (gripper_side == "right") {
+            bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(55), deg2rad(55), deg2rad(55)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            if (!bh_r.waitForSuccess(5.0)) {
+                std::cout << "ERROR: moveFingers" << std::endl;
+                return;
+            }
+        }
+        else {
+            bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(55), deg2rad(55), deg2rad(55)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            if (!bh_l.waitForSuccess(5.0)) {
+                std::cout << "ERROR: moveFingers" << std::endl;
+                return;
+            }
+        }
+
+        // update the robot state for planners
+        vi.waitForJointState(q, ign_q);
+        kin_model->setIgnoredJointValues(ign_joint_names, ign_q);
+        showPlanerState(markers_pub_, q, col_model, kin_model);
+
+        std::cout << "type 'c' to continue (change tool and stiffness)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         // move to the grasp pose (cartesian impedance)
-        // TODO
+        // first, set the tool pose for both hands
+        KDL::Frame T_Wr_Gr;
+        KDL::Frame T_Wl_Gl;
+        {
+            KDL::Frame T_W_Wr, T_W_Gr, T_W_Wl, T_W_Gl;
+            kin_model->calculateFk(T_W_Wl, "left_arm_7_link", q, ign_q);
+            kin_model->calculateFk(T_W_Wr, "right_arm_7_link", q, ign_q);
+            kin_model->calculateFk(T_W_Gl, "left_HandGripLink", q, ign_q);
+            kin_model->calculateFk(T_W_Gr, "right_HandGripLink", q, ign_q);
+            T_Wl_Gl = T_W_Wl.Inverse() * T_W_Gl;
+            T_Wr_Gr = T_W_Wr.Inverse() * T_W_Gr;
+        }
+
+        if (!vi.moveToolLeft(T_Wl_Gl, 0.1, 0.2)) {
+            std::cout << "ERROR: moveToolLeft" << std::endl;
+            return;
+        }
+        if (!vi.moveToolRight(T_Wr_Gr, 0.1, 0.2)) {
+            std::cout << "ERROR: moveToolRight" << std::endl;
+            return;
+        }
+        if (!vi.waitForToolMoveLeft(1.0)) {
+            std::cout << "ERROR: waitForToolMoveLeft" << std::endl;
+            return;
+        }
+        if (!vi.waitForToolMoveRight(1.0)) {
+            std::cout << "ERROR: waitForToolMoveRight" << std::endl;
+            return;
+        }
+
+        // set the impedance
+        {
+            bool result = vi.moveImpedanceLeft( 0.1, 0.2, KDL::Wrench(KDL::Vector(1000, 1000, 1000), KDL::Vector(150, 150, 150)), KDL::Wrench(KDL::Vector(0.7, 0.7, 0.7), KDL::Vector(0.7, 0.7, 0.7)) );
+            result &= vi.moveImpedanceRight( 0.1, 0.2, KDL::Wrench(KDL::Vector(1000, 1000, 1000), KDL::Vector(150, 150, 150)), KDL::Wrench(KDL::Vector(0.7, 0.7, 0.7), KDL::Vector(0.7, 0.7, 0.7)) );
+            result &= vi.waitForImpedanceLeft(1.0);
+            result &= vi.waitForImpedanceRight(1.0);
+            if (!result) {
+                std::cout << "ERROR: moveImpedance" << std::endl;
+                return;
+            }
+        }
+
+        std::cout << "type 'c' to continue (switch to cartesian impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
+
+        // swith to cartesian impedance
+        vi.switchToCart();
+
+        std::cout << "type 'c' to continue (move in cartesian impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
+
+        // move the end effector
+        {
+            KDL::Frame T_W_B, T_B_Gbest;
+            kin_model->calculateFk(T_W_B, "torso_base", q, ign_q);
+            T_B_Gbest = T_W_B.Inverse() * T_W_Gbest;
+
+            if (gripper_side == "right") {
+                bool result = vi.moveEffectorRight(T_B_Gbest, 60.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveRight(100.0 * time_mult);
+                if (!result) {
+                    std::cout << "ERROR: moveEffector" << std::endl;
+                    return;
+                }
+            }
+            else {
+                bool result = vi.moveEffectorLeft(T_B_Gbest, 60.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveLeft(100.0 * time_mult);
+                if (!result) {
+                    std::cout << "ERROR: moveEffector" << std::endl;
+                    return;
+                }
+            }
+        }
+
+        std::cout << "type 'c' to continue (close the fingers)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         // close the fingers to the grasp configuration
-        // TODO
+        if (gripper_side == "right") {
+            bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            if (!bh_r.waitForSuccess(5.0)) {
+                std::cout << "ERROR: moveFingers" << std::endl;
+                return;
+            }
+        }
+        else {
+            bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            if (!bh_l.waitForSuccess(5.0)) {
+                std::cout << "ERROR: moveFingers" << std::endl;
+                return;
+            }
+        }
+
+        // update the robot state for planners
+        vi.waitForJointState(q, ign_q);
+        kin_model->setIgnoredJointValues(ign_joint_names, ign_q);
+        showPlanerState(markers_pub_, q, col_model, kin_model);
+
+        std::cout << "type 'c' to continue (plan)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
         // move the jar out of the cabinet
+        // reattach the jar to the gripper
         col_model->removeCollisionFromLink("env_link", jar_co);
-
         KDL::Frame T_W_Ecurrent;
         kin_model->calculateFk(T_W_Ecurrent, hand_name, q, ign_q);
         KDL::Frame T_E_J = T_W_Ecurrent.Inverse() * T_W_J;
@@ -420,138 +622,20 @@ public:
         showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
-        return;
-
-/*
-        for (int i = 0; i < 100; i++) {
-            // publish markers and robot state with limited rate
-            publishTransform(br, r_HAND_target, "effector_dest", "world");
-
-            // calculate forward kinematics for all links
-            for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-                kin_model->calculateFk(links_fk[l_idx], col_model->getLinkName(l_idx), q, ign_q);
-            }
-            publishJointState(joint_state_pub_, q, joint_names, ign_q, ign_joint_names);
-            int m_id = 0;
-            m_id = addRobotModelVis(markers_pub_, m_id, col_model, links_fk);
-
-            markers_pub_.addEraseMarkers(m_id, m_id+300);
-
-            markers_pub_.publish();
-
-            ros::spinOnce();
-            ros::Duration(0.01).sleep();
+        std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
         }
+
+        // execute trajectory
+
+        // swith to joint impedance
+        vi.switchToJoint();
+
+        vi.moveJointTraj(path, 0.5, deg2rad(1 / time_mult));
+        vi.waitForJoint(240 * time_mult);
 
         return;
-*/
-
-        Eigen::VectorXd dq(ndof), ddq(ndof);
-        dq.setZero();
-        ddq.setZero();
-
-        Eigen::VectorXd max_q(ndof);
-        max_q(0) = 10.0/180.0*PI;               // torso_0_joint
-        max_q(1) = max_q(8) = 20.0/180.0*PI;    // arm_0_joint
-        max_q(2) = max_q(9) = 20.0/180.0*PI;    // arm_1_joint
-        max_q(3) = max_q(10) = 30.0/180.0*PI;   // arm_2_joint
-        max_q(4) = max_q(11) = 40.0/180.0*PI;   // arm_3_joint
-        max_q(5) = max_q(12) = 50.0/180.0*PI;   // arm_4_joint
-        max_q(6) = max_q(13) = 50.0/180.0*PI;   // arm_5_joint
-        max_q(7) = max_q(14) = 50.0/180.0*PI;   // arm_6_joint
-
-        // create dynamics model
-        boost::shared_ptr<DynamicModel > dyn_model( new DynModelVelma() );
-        boost::shared_ptr<DynamicsSimulatorHandPose> sim(new DynamicsSimulatorHandPose(ndof, 6, effector_name, col_model, kin_model, dyn_model, joint_names, q_eq, 10000.0*max_q ) );
-        boost::shared_ptr<ReachabilityMap > r_map(new ReachabilityMap(0.04, 3));
-
-        // loop variables
-        ros::Time last_time = ros::Time::now();
-        ros::Rate loop_rate(200);
-
-        // set colors for each link
-        for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-            for (self_collision::Link::VecPtrCollision::iterator it = col_model->getLink(l_idx)->collision_array.begin(); it != col_model->getLink(l_idx)->collision_array.end(); it++) {
-                (*it)->geometry->setColor(0,1,0,0.5);
-            }
-        }
-
-        // show the initial configuration for 2 seconds.
-        for (int i=0; i<20; i++) {
-            // calculate forward kinematics for all links
-            for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-                kin_model->calculateFk(links_fk[l_idx], col_model->getLinkName(l_idx), q, ign_q);
-            }
-//            publishJointState(joint_state_pub_, q, joint_names, ign_q, ign_joint_names);
-            int m_id = 0;
-            m_id = addRobotModelVis(markers_pub_, m_id, col_model, links_fk);
-            markers_pub_.publish();
-            ros::spinOnce();
-            ros::Duration(0.1).sleep();
-        }
-
-        sim->updateMetric( boost::bind(&distanceMetric, _1, _2, r_map) );
-
-        sim->setState(q, dq, ddq);
-        sim->setTarget(r_HAND_target);
-
-        KDL::Vector lower_bound(-0.4, -0.9, 0.3);
-        KDL::Vector upper_bound(1.5, 0.9, 2.2);
-        if (!r_map->createDistanceMap(r_HAND_target.p, boost::bind(&checkCollision, _1, col_model, 0.04), lower_bound, upper_bound)) {
-            std::cout << "could not create the distance map" << std::endl;
-        }
-        else {
-            std::cout << "created distance map" << std::endl;
-        }
-
-        bool stop = false;
-        while (ros::ok() && !stop) {
-
-            sim->oneStep(&markers_pub_, 3000);
-            if (sim->inCollision()) {
-                std::cout << "collision" << std::endl;
-                printJointLimits(q, kin_model, joint_names);
-                std::cout << q.transpose() << std::endl;
-                stop = true;
-            }
-
-            sim->getState(q, dq, ddq);
-            KDL::Frame current_T_B_E;
-            kin_model->calculateFk(current_T_B_E, effector_name, q, ign_q);
-
-            KDL::Twist diff = KDL::diff(r_HAND_target, current_T_B_E);
-            if (diff.vel.Norm() < 0.015 && diff.rot.Norm() < 5.0/180.0*PI) {
-                std::cout << "goal reached" << std::endl;
-                stop = true;
-            }
-
-            // publish markers and robot state with limited rate
-            ros::Duration time_elapsed = ros::Time::now() - last_time;
-            if (time_elapsed.toSec() > 0.05) {
-                publishTransform(br, r_HAND_target, "effector_dest", "world");
-
-                // calculate forward kinematics for all links
-                for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-                    kin_model->calculateFk(links_fk[l_idx], col_model->getLinkName(l_idx), q, ign_q);
-                }
-//                publishJointState(joint_state_pub_, q, joint_names, ign_q, ign_joint_names);
-                int m_id = 0;
-                m_id = addRobotModelVis(markers_pub_, m_id, col_model, links_fk);
-
-                markers_pub_.addEraseMarkers(m_id, m_id+300);
-
-                markers_pub_.publish();
-                last_time = ros::Time::now();
-            }
-            else {
-                markers_pub_.clear();
-            }
-            ros::spinOnce();
-            loop_rate.sleep();
-        }
-
-
-
 //*/
     }
 };

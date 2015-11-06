@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 2.8)
 project(velma_robrex)
 
 find_package(catkin REQUIRED COMPONENTS
-  rtt_ros rtt_rosclock std_msgs interactive_markers tf eigen_conversions cmake_modules collision_convex_model kin_dyn_model planer_utils octomap_msgs barrett_hand_controller_msgs
+    rtt_ros rtt_rosclock std_msgs interactive_markers tf eigen_conversions cmake_modules collision_convex_model kin_dyn_model
+    planer_utils octomap_msgs barrett_hand_controller_msgs kdl_conversions
   )
 
 find_package(Eigen REQUIRED)

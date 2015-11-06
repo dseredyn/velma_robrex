@@ -45,11 +45,15 @@ protected:
     ros::NodeHandle nh_;
     const std::string prefix_;
     actionlib::SimpleActionClient<barrett_hand_controller_msgs::BHMoveAction> action_move_;
+    ros::Publisher reset_fingers_pub_;
+    ros::Publisher calibrate_sensors_pub_;
 
 public:
     BarrettHandInterface(const std::string &prefix);
     ~BarrettHandInterface();
     void resetFingers();
+    void calibrateTactileSensors();
+
     // spread, f1, f2, f3
     void moveFingers(const Eigen::Vector4d &q, const Eigen::Vector4d &v, const Eigen::Vector4d &t, double max_pressure, bool hold);
     bool waitForSuccess(double max_duration);

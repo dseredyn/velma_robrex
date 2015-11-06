@@ -30,11 +30,14 @@
 //
 
 #include "barrett_hand_interface.h"
+#include <std_msgs/Empty.h>
 
     BarrettHandInterface::BarrettHandInterface(const std::string &prefix) :
         nh_(),
         prefix_(prefix),
-        action_move_(std::string("/") + prefix_ + "_hand/move_hand", true)
+        action_move_(std::string("/") + prefix_ + "_hand/move_hand", true),
+        reset_fingers_pub_(nh_.advertise<std_msgs::Empty>(std::string("/") + prefix_ + "_hand/reset_fingers", 1000)),
+        calibrate_sensors_pub_(nh_.advertise<std_msgs::Empty>(std::string("/") + prefix_ + "_hand/calibrate_tactile_sensors", 1000))
     {
     }
 
@@ -42,10 +45,13 @@
     }
 
     void BarrettHandInterface::resetFingers() {
-        barrett_hand_controller_msgs::Empty reset_fingers;
-        if (!ros::service::call(std::string("/") + prefix_ + "_hand/reset_fingers", reset_fingers)) {
-            std::cout << "ERROR: ros::service::call(\"/" << prefix_ << "_hand/reset_fingers\" " << std::endl;
-        }
+        std_msgs::Empty msg;
+        reset_fingers_pub_.publish(msg);
+    }
+
+    void BarrettHandInterface::calibrateTactileSensors() {
+        std_msgs::Empty msg;
+        calibrate_sensors_pub_.publish(msg);
     }
 
     void BarrettHandInterface::moveFingers(const Eigen::Vector4d &q, const Eigen::Vector4d &v, const Eigen::Vector4d &t, double max_pressure, bool hold) {
