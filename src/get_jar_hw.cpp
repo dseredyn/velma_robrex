@@ -221,14 +221,17 @@ public:
         BarrettHandInterface bh_r("right");
         ros::Duration(1.0).sleep();
 
+        bh_l.calibrateTactileSensors();
+        bh_r.calibrateTactileSensors();
+        ros::Duration(1.1).sleep();
 
         bh_l.resetFingers();
         bh_r.resetFingers();
 
         ros::Duration(5.0).sleep();
 
-        bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
-        bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+        bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(4000, 4000, 4000, 4000), 1000, false);
+        bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(130), deg2rad(130), deg2rad(130)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(4000, 4000, 4000, 4000), 1000, false);
 
         if (!bh_l.waitForSuccess(5.0)) {
             std::cout << "ERROR: bh_l.moveFingers" << std::endl;
