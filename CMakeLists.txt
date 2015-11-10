@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 project(velma_robrex)
 
 find_package(catkin REQUIRED COMPONENTS
-    rtt_ros rtt_rosclock std_msgs interactive_markers tf eigen_conversions cmake_modules collision_convex_model kin_dyn_model
+    rtt_ros rtt_rosclock std_msgs interactive_markers tf pcl_ros pcl_conversions eigen_conversions cmake_modules collision_convex_model kin_dyn_model
     planer_utils octomap_msgs barrett_hand_controller_msgs kdl_conversions
   )
 
@@ -20,8 +20,11 @@ add_executable(robrex_get_jar_hw src/get_jar_hw.cpp src/velma_dyn_model.cpp src/
                 src/experiments_utilities.cpp src/ompl_utilities.cpp src/velma_robrex_utilities.cpp src/barrett_hand_interface.cpp
                 src/velma_interface.cpp)
 
+add_executable(robrex_pc_filter src/pc_filter.cpp)# src/velma_robrex_utilities.cpp)
+
 target_link_libraries(robrex_get_jar ${catkin_LIBRARIES} ${OMPL_LIBRARIES} ${OCTOMAP_LIBRARIES})
 target_link_libraries(robrex_get_jar_hw ${catkin_LIBRARIES} ${OMPL_LIBRARIES} ${OCTOMAP_LIBRARIES})
+target_link_libraries(robrex_pc_filter ${catkin_LIBRARIES})
 
 catkin_package(
     DEPENDS ompl eigen

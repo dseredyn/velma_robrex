@@ -34,6 +34,8 @@
 #include <sensor_msgs/JointState.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <tf/transform_broadcaster.h>
+#include <tf/transform_listener.h>
+#include <tf/transform_datatypes.h>
 #include <octomap/octomap.h>
 #include <octomap_msgs/conversions.h>
 #include <octomap_msgs/GetOctomap.h>
@@ -42,6 +44,8 @@
 #include <string>
 #include <stdlib.h>
 #include <stdio.h>
+
+#include "kdl_conversions/kdl_msg.h"
 
 #include "Eigen/Dense"
 #include "Eigen/LU"
@@ -85,6 +89,7 @@ class TestDynamicModel {
     ros::Publisher joint_state_pub_;
     MarkerPublisher markers_pub_;
     tf::TransformBroadcaster br;
+    tf::TransformListener tf_listener_;
 
     const double PI;
 
@@ -109,9 +114,54 @@ public:
         return c;
     }
 
+    bool getJarPose(KDL::Frame &T_W_J) {
+        tf::StampedTransform tf_W_J;
+        try{
+            tf_listener_.lookupTransform("world", "jar", ros::Time(0), tf_W_J);
+        }
+        catch (tf::TransformException ex){
+            ROS_ERROR("%s",ex.what());
+            return false;
+        }
+        geometry_msgs::TransformStamped tfm_W_J;
+        tf::transformStampedTFToMsg(tf_W_J, tfm_W_J);
+        tf::transformMsgToKDL(tfm_W_J.transform, T_W_J);
+        return true;
+    }
+
+    boost::shared_ptr<octomap::OcTree > getOctomap() {
+        boost::shared_ptr<octomap::OcTree > oc_map;
+        {
+            // get the octomap from the server
+            octomap_msgs::GetOctomap get_oc_map;
+            if (!ros::service::call("/octomap_full", get_oc_map)) {
+                std::cout << "ERROR: ros::service::call(\"/octomap_full\" " << std::endl;
+                return boost::shared_ptr<octomap::OcTree >();
+            }
+            oc_map.reset( static_cast<octomap::OcTree* >( octomap_msgs::fullMsgToMap( get_oc_map.response.map ) ) );
+
+            // delete all unnecessary nodes
+            oc_map->expand();
+            int occupied_count = 0;
+            std::list<octomap::OcTreeKey > del_key_list;
+            for (octomap::OcTree::leaf_iterator it = oc_map->begin_leafs(); it != oc_map->end_leafs(); it++) {
+                if(it->getOccupancy() <= oc_map->getOccupancyThres())
+                {
+                    del_key_list.push_back(it.getKey());
+                    continue;
+                }
+                occupied_count++;
+            }
+            for (std::list<octomap::OcTreeKey >::const_iterator it = del_key_list.begin(); it != del_key_list.end(); it++) {
+                oc_map->deleteNode( (*it) );
+            }
+        }
+        return oc_map;
+    }
+
     void spin() {
 
-        double time_mult = 0.3;
+        double time_mult = 0.15;
 
         std::string gripper_side("right");
         std::string effector_name = gripper_side + "_HandGripLink";
@@ -119,8 +169,6 @@ public:
 
         // initialize random seed
         srand(time(NULL));
-
-        KDL::Frame T_W_J(KDL::Vector(0.85, 0, 1.22));
 
         std::string robot_description_str;
         std::string robot_semantic_description_str;
@@ -134,20 +182,19 @@ public:
 	    col_model->parseSRDF(robot_semantic_description_str);
         col_model->generateCollisionPairs();
 
-        // external collision objects - part of virtual link connected to the base link
-        self_collision::Link::VecPtrCollision col_array;
-
-//        KDL::Frame T_W_LOCK, T_W_BIN;
-//        createEnvironment(col_array, T_W_LOCK, T_W_BIN);
-
-        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.045, 0.07, T_W_J);
-        col_array.push_back( jar_co );
-
-//        col_array.push_back( self_collision::createCollisionOctomap(oc_map, KDL::Frame()) );
-
-        if (!col_model->addLink("env_link", "torso_base", col_array)) {
-            ROS_ERROR("ERROR: could not add external collision objects to the collision model");
-            return;
+        //
+        // prepare the octomap
+        //
+        boost::shared_ptr<octomap::OcTree > oc_map = getOctomap();
+        boost::shared_ptr< self_collision::Collision > ocmap_co = self_collision::createCollisionOctomap(oc_map, KDL::Frame());
+        // add the environment link
+        {
+            self_collision::Link::VecPtrCollision col_array;
+            col_array.push_back( ocmap_co );
+            if (!col_model->addLink("env_link", "torso_base", col_array)) {
+                ROS_ERROR("ERROR: could not add external collision objects to the collision model");
+                return;
+            }
         }
         col_model->generateCollisionPairs();
 
@@ -325,41 +372,21 @@ public:
         vi.waitForJoint(240 * time_mult);
 
         //
-        // prepare the octomap
+        // update the octomap and the jar
         //
-        boost::shared_ptr<octomap::OcTree > oc_map;
-        {
-            // get the octomap from the server
-            octomap_msgs::GetOctomap get_oc_map;
-            if (!ros::service::call("/octomap_full", get_oc_map)) {
-                std::cout << "ERROR: ros::service::call(\"/octomap_full\" " << std::endl;
-                return;
-            }
-            oc_map.reset( static_cast<octomap::OcTree* >( octomap_msgs::fullMsgToMap( get_oc_map.response.map ) ) );
-
-            // delete all unnecessary nodes
-            oc_map->expand();
-            int occupied_count = 0;
-            std::list<octomap::OcTreeKey > del_key_list;
-            for (octomap::OcTree::leaf_iterator it = oc_map->begin_leafs(); it != oc_map->end_leafs(); it++) {
-                if(it->getOccupancy() <= oc_map->getOccupancyThres())
-                {
-                    del_key_list.push_back(it.getKey());
-                    continue;
-                }
-                occupied_count++;
-            }
-            for (std::list<octomap::OcTreeKey >::const_iterator it = del_key_list.begin(); it != del_key_list.end(); it++) {
-                oc_map->deleteNode( (*it) );
-            }
-        }
+        col_model->removeCollisionFromLink("env_link", ocmap_co);
+        oc_map = getOctomap();
         // remove the jar from the octomap
-        removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
-//        col_array.push_back( self_collision::createCollisionOctomap(oc_map, KDL::Frame()) );
-        col_model->addCollisionToLink("env_link", self_collision::createCollisionOctomap(oc_map, KDL::Frame()), KDL::Frame());
+        KDL::Frame T_W_J;
+        getJarPose(T_W_J);
+//        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.045, 0.07, T_W_J);
+        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.05, 0.09, T_W_J);
+        jar_co->geometry->setColor(1,0,0,0.5);
 
+        self_collision::removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
 
-
+        ocmap_co = self_collision::createCollisionOctomap(oc_map, KDL::Frame());
+        col_model->addCollisionToLink("env_link", ocmap_co, KDL::Frame());
 
         // update the robot state for planners
         vi.waitForJointState(q, ign_q);
@@ -375,9 +402,9 @@ public:
         std::list<KDL::Frame> T_W_G_list;
         for (double grip_angle = 0.0; grip_angle < deg2rad(359); grip_angle += deg2rad(5.0)) {
             T_W_G_list.push_back(
-                T_W_J * KDL::Frame(KDL::Rotation::RotZ(grip_angle)) * KDL::Frame(KDL::Rotation::RotY(deg2rad(90))) * KDL::Frame(KDL::Vector(0,0,-0.03)) );
+                T_W_J * KDL::Frame(KDL::Rotation::RotZ(grip_angle)) * KDL::Frame(KDL::Rotation::RotY(deg2rad(90))) * KDL::Frame(KDL::Vector(0,0,0.0)) );
             T_W_G_list.push_back(
-                T_W_J * KDL::Frame(KDL::Rotation::RotZ(grip_angle)) * KDL::Frame(KDL::Rotation::RotY(deg2rad(90))) * KDL::Frame(KDL::Vector(0,0,-0.03)) * KDL::Frame(KDL::Rotation::RotZ(deg2rad(180))) );
+                T_W_J * KDL::Frame(KDL::Rotation::RotZ(grip_angle)) * KDL::Frame(KDL::Rotation::RotY(deg2rad(90))) * KDL::Frame(KDL::Vector(0,0,0.0)) * KDL::Frame(KDL::Rotation::RotZ(deg2rad(180))) );
         }
 
         double grip_backoff = 0.14;
@@ -452,6 +479,9 @@ public:
 
         std::cout << "min_dist: " << max_dist << std::endl;
         publishTransform(br, T_W_Gbest, std::string("effector_dest"), "world");
+
+        // add the jar object to the collision detection engine
+        col_model->addCollisionToLink("env_link", jar_co, KDL::Frame());
 
         // move to the pre-grasp pose
         KDL::Frame r_HAND_target = T_W_Gbest * KDL::Frame(KDL::Vector(0,0,-grip_backoff));
@@ -560,16 +590,16 @@ public:
             T_B_Gbest = T_W_B.Inverse() * T_W_Gbest;
 
             if (gripper_side == "right") {
-                bool result = vi.moveEffectorRight(T_B_Gbest, 60.0 * time_mult, 10.0, 4.0, 0.2);
-                result &= vi.waitForEffectorMoveRight(100.0 * time_mult);
+                bool result = vi.moveEffectorRight(T_B_Gbest, 30.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveRight(50.0 * time_mult);
                 if (!result) {
                     std::cout << "ERROR: moveEffector" << std::endl;
                     return;
                 }
             }
             else {
-                bool result = vi.moveEffectorLeft(T_B_Gbest, 60.0 * time_mult, 10.0, 4.0, 0.2);
-                result &= vi.waitForEffectorMoveLeft(100.0 * time_mult);
+                bool result = vi.moveEffectorLeft(T_B_Gbest, 30.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveLeft(50.0 * time_mult);
                 if (!result) {
                     std::cout << "ERROR: moveEffector" << std::endl;
                     return;
@@ -584,20 +614,49 @@ public:
 
         // close the fingers to the grasp configuration
         if (gripper_side == "right") {
-            bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            bh_r.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 400, false);
             if (!bh_r.waitForSuccess(5.0)) {
                 std::cout << "ERROR: moveFingers" << std::endl;
                 return;
             }
         }
         else {
-            bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 1000, false);
+            bh_l.moveFingers(Eigen::Vector4d(0, deg2rad(100), deg2rad(100), deg2rad(100)), Eigen::Vector4d(1.2, 1.2, 1.2, 1.2), Eigen::Vector4d(3000, 3000, 3000, 3000), 400, false);
             if (!bh_l.waitForSuccess(5.0)) {
                 std::cout << "ERROR: moveFingers" << std::endl;
                 return;
             }
         }
+/*
+        std::cout << "type 'c' to continue (move in cartesian impedance)" << std::endl;
+        if (getchar2() != 'c' || !ros::ok()) {
+            return;
+        }
 
+        // move the end effector
+        {
+            KDL::Frame T_W_B, T_B_Gbest;
+            kin_model->calculateFk(T_W_B, "torso_base", q, ign_q);
+            T_B_Gbest = T_W_B.Inverse() * T_W_Gbest;
+
+            if (gripper_side == "right") {
+                bool result = vi.moveEffectorRight(T_B_Gbest, 30.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveRight(50.0 * time_mult);
+                if (!result) {
+                    std::cout << "ERROR: moveEffector" << std::endl;
+                    return;
+                }
+            }
+            else {
+                bool result = vi.moveEffectorLeft(T_B_Gbest, 30.0 * time_mult, 10.0, 4.0, 0.2);
+                result &= vi.waitForEffectorMoveLeft(50.0 * time_mult);
+                if (!result) {
+                    std::cout << "ERROR: moveEffector" << std::endl;
+                    return;
+                }
+            }
+        }
+*/
         // update the robot state for planners
         vi.waitForJointState(q, ign_q);
         kin_model->setIgnoredJointValues(ign_joint_names, ign_q);

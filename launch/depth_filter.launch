@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="velma_robrex" type="robrex_pc_filter" name="robrex_pc_filter2" output="screen">
+      <param name="tolerance" value="0.1" type="double" />
+      <remap from="cloud_in" to="/head_kinect/depth_registered/points"/>
+      <remap from="cloud_out" to="/pc_filtered/points"/>
+    </node>
+</launch>
+
