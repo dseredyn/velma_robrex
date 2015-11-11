@@ -247,7 +247,7 @@ static const double PI = 3.141592653589793;
 
     bool planTrajectorySIM(const Eigen::VectorXd &q, const Eigen::VectorXd &q_eq, const std::string &effector_name, const KDL::Frame &target_T_W_G,
                         const boost::shared_ptr<self_collision::CollisionModel > &col_model, const boost::shared_ptr<KinematicModel > &kin_model,
-                        std::list<Eigen::VectorXd > &path) {
+                        std::list<Eigen::VectorXd > &path, MarkerPublisher *markers_pub) {
 
         path.clear();
 
@@ -290,9 +290,17 @@ static const double PI = 3.141592653589793;
             std::cout << "planTrajectorySIM: created distance map" << std::endl;
         }
 
+        ros::Time last_time = ros::Time::now();
+        ros::Rate loop_rate(500);
+        std::vector<KDL::Frame > links_fk(col_model->getLinksCount());
+        Eigen::VectorXd ign_q;
+        std::vector<std::string > ign_joint_names;
+        kin_model->getIgnoredJoints(ign_q, ign_joint_names);
+
         bool goal_reached = false;
         for (int iter = 0; iter < 4000; iter++) {
-            sim->oneStep();
+            sim->oneStep(markers_pub, 3000);
+//            sim->oneStep();
             if (sim->inCollision()) {
                 std::cout << "ERROR: planTrajectorySIM: collision" << std::endl;
                 return false;
@@ -316,6 +324,29 @@ static const double PI = 3.141592653589793;
                 goal_reached = true;
                 break;
             }
+
+            if (markers_pub != NULL) {
+                // publish markers and robot state with limited rate
+                ros::Duration time_elapsed = ros::Time::now() - last_time;
+                if (time_elapsed.toSec() > 0.05) {
+                    // calculate forward kinematics for all links
+                    for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
+                        kin_model->calculateFk(links_fk[l_idx], col_model->getLinkName(l_idx), qq, ign_q);
+                    }
+                    int m_id = 0;
+                    m_id = addRobotModelVis(*markers_pub, m_id, col_model, links_fk);
+
+                    markers_pub->addEraseMarkers(m_id, m_id+300);
+
+                    markers_pub->publish();
+                    last_time = ros::Time::now();
+                }
+                else {
+                    markers_pub->clear();
+                }
+                ros::spinOnce();
+                loop_rate.sleep();
+            }
         }
 
         if (!goal_reached) {
@@ -323,7 +354,6 @@ static const double PI = 3.141592653589793;
             return false;
         }
 
-//        tmp_path.pop_front();
         path = tmp_path;
 
         return true;

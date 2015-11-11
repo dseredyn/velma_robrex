@@ -94,7 +94,7 @@
 
     bool planTrajectorySIM(const Eigen::VectorXd &q, const Eigen::VectorXd &q_eq, const std::string &effector_name, const KDL::Frame &target_T_W_G,
                         const boost::shared_ptr<self_collision::CollisionModel > &col_model, const boost::shared_ptr<KinematicModel > &kin_model,
-                        std::list<Eigen::VectorXd > &path);
+                        std::list<Eigen::VectorXd > &path, MarkerPublisher *markers_pub=NULL);
 
 #endif  // VELMA_ROBREX_UTILITIES_H__
 

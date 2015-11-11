@@ -384,7 +384,16 @@ public:
         jar_co->geometry->setColor(1,0,0,0.5);
 
         self_collision::removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
-
+/*
+        {
+            int m_id = 3000;
+            m_id = markers_pub_.addOctomap(m_id, *oc_map, "world");
+            markers_pub_.publish();
+            ros::spinOnce();
+            ros::Duration(1).sleep();
+        }
+        return;
+//*/
         ocmap_co = self_collision::createCollisionOctomap(oc_map, KDL::Frame());
         col_model->addCollisionToLink("env_link", ocmap_co, KDL::Frame());
 
@@ -485,11 +494,11 @@ public:
 
         // move to the pre-grasp pose
         KDL::Frame r_HAND_target = T_W_Gbest * KDL::Frame(KDL::Vector(0,0,-grip_backoff));
-        if (!planTrajectorySIM(q, q_eq, effector_name, r_HAND_target, col_model, kin_model, path)) {
+        if (!planTrajectorySIM(q, q_eq, effector_name, r_HAND_target, col_model, kin_model, path, &markers_pub_)) {
             std::cout << "SIM failure" << std::endl;
             return;
         }
-        showTrajectory(markers_pub_, col_model, kin_model, path);
+//        showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
         std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
@@ -677,11 +686,11 @@ public:
         col_model->addCollisionToLink(hand_name, jar_co, T_E_J);
 
         r_HAND_target = KDL::Frame(KDL::Rotation::RotZ(deg2rad(60)) * KDL::Rotation::RotY(deg2rad(90)), KDL::Vector(0.45, -0.2, 1.3));
-        if (!planTrajectorySIM(q, q_eq, effector_name, r_HAND_target, col_model, kin_model, path)) {
+        if (!planTrajectorySIM(q, q_eq, effector_name, r_HAND_target, col_model, kin_model, path, &markers_pub_)) {
             std::cout << "SIM failure" << std::endl;
             return;
         }
-        showTrajectory(markers_pub_, col_model, kin_model, path);
+//        showTrajectory(markers_pub_, col_model, kin_model, path);
         q = path.back();
 
         std::cout << "type 'c' to continue (move in joint impedance)" << std::endl;
