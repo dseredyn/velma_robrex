@@ -35,7 +35,6 @@
 #include <ros/ros.h>
 #include <sensor_msgs/JointState.h>
 #include <actionlib/client/simple_action_client.h>
-#include <barrett_hand_controller_msgs/Empty.h>
 #include <barrett_hand_controller_msgs/BHMoveAction.h>
 
 #include "Eigen/Dense"

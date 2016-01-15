@@ -50,7 +50,6 @@
 #include "Eigen/Dense"
 #include "Eigen/LU"
 
-#include "barrett_hand_controller_msgs/Empty.h"
 #include <barrett_hand_controller_msgs/BHMoveAction.h>
 
 #include <ompl/base/spaces/RealVectorStateSpace.h>
@@ -380,19 +379,20 @@ public:
         KDL::Frame T_W_J;
         getJarPose(T_W_J);
 //        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.045, 0.07, T_W_J);
-        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.05, 0.09, T_W_J);
+        boost::shared_ptr< self_collision::Collision > jar_co = self_collision::createCollisionCapsule(0.06, 0.06, T_W_J);
         jar_co->geometry->setColor(1,0,0,0.5);
 
         self_collision::removeNodesFromOctomap(oc_map, jar_co->geometry, T_W_J);
-/*
+//*
         {
             int m_id = 3000;
             m_id = markers_pub_.addOctomap(m_id, *oc_map, "world");
             markers_pub_.publish();
             ros::spinOnce();
             ros::Duration(1).sleep();
+            std::cout << "published octomap" << std::endl;
         }
-        return;
+//        return;
 //*/
         ocmap_co = self_collision::createCollisionOctomap(oc_map, KDL::Frame());
         col_model->addCollisionToLink("env_link", ocmap_co, KDL::Frame());

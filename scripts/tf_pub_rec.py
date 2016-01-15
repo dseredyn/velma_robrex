@@ -67,7 +67,7 @@ class TfPub:
 
     def recognizedCallback(self, msg):
         self.T_C_Jb = pm.fromMsg(msg.pose.pose.pose)
-        self.T_C_J = self.T_C_Jb * PyKDL.Frame(PyKDL.Vector(0,0,0.13))
+        self.T_C_J = self.T_C_Jb * PyKDL.Frame(PyKDL.Vector(0,0,0.11))
         self.frame_id = msg.header.frame_id
 
     def __init__(self):
